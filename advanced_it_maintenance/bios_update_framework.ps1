@@ -1,74 +1,117 @@
-# BIOS Update Framework (Vendor Detection)
-
-Write-Output "Detecting hardware vendor..."
+Write-Output "`n=== Hardware Vendor Detection ==="
 
 $vendor = (Get-CimInstance Win32_ComputerSystem).Manufacturer
 Write-Output "Vendor detected: $vendor"
 
 $DownloadUrl = $null
-$Installer = "$env:TEMP\VendorUpdate.exe"
+$ZipPath = "$env:TEMP\VendorUtility.zip"
+$InstallerPath = "$env:TEMP\VendorUtility.exe"
+$ExtractPath = "$env:TEMP\VendorUtilityExtract"
 
 switch -Wildcard ($vendor) {
 
     "*Lenovo*" {
-        Write-Output "Lenovo system detected. Preparing Lenovo System Update..."
+        Write-Output "Lenovo detected. Preparing Lenovo System Update (SAFE mode)..."
         $DownloadUrl = "https://download.lenovo.com/pccbbs/thinkvantage_en/system_update_5.07.0113.exe"
     }
 
     "*Dell*" {
-        Write-Output "Dell system detected. Preparing Dell Command Update..."
+        Write-Output "Dell detected. Preparing Dell Command Update (SAFE mode)..."
         $DownloadUrl = "https://downloads.dell.com/FOLDER07532795M/1/Dell-Command-Update-Application_XJ9R4_WIN_5.1.0_A00.EXE"
     }
 
     "*HP*" {
-        Write-Output "HP system detected. Preparing HP Image Assistant..."
+        Write-Output "HP detected. Preparing HP Image Assistant (SAFE mode)..."
         $DownloadUrl = "https://ftp.hp.com/pub/caps-softpaq/cmit/HPIA/5.1.6.1/HPIA.exe"
     }
 
     "*Micro-Star*" {
-        Write-Output "MSI system detected. Preparing MSI Center..."
-        # MSI Center Installer (EXE inside a ZIP)
+        Write-Output "MSI detected. Preparing MSI Center (SAFE mode)..."
         $DownloadUrl = "https://download.msi.com/uti_exe/nb/MSI_Center_Installer.zip"
     }
 
     default {
-        Write-Output "Unsupported vendor. BIOS update utility will not be installed."
+        Write-Output "Unsupported vendor. Exiting safely."
         return
     }
 }
 
 # Safety check
 if (-not $DownloadUrl) {
-    Write-Output "No download URL available for this vendor."
+    Write-Output "Download URL missing — exiting."
     return
 }
 
-Write-Output "Downloading vendor update utility..."
-Invoke-WebRequest -Uri $DownloadUrl -OutFile "$Installer.zip" -UseBasicParsing
+Write-Output "Downloading vendor utility safely..."
+Invoke-WebRequest -Uri $DownloadUrl -OutFile $ZipPath -UseBasicParsing -ErrorAction Stop
 
-# MSI requires unzip step
+# MSI requires extraction
 if ($vendor -like "*Micro-Star*") {
     Write-Output "Extracting MSI Center installer..."
-    Expand-Archive "$Installer.zip" -DestinationPath $env:TEMP -Force
+    if (Test-Path $ExtractPath) { Remove-Item $ExtractPath -Recurse -Force }
+    Expand-Archive -Path $ZipPath -DestinationPath $ExtractPath -Force
 
-    # Find the EXE inside the extracted folder
-    $ExtractedExe = Get-ChildItem $env:TEMP -Recurse -Filter "*.exe" | Select-Object -First 1
+    $Exe = Get-ChildItem $ExtractPath -Recurse -Filter "*.exe" | Select-Object -First 1
 
-    if ($ExtractedExe) {
-        Write-Output "Installing MSI Center..."
-        Start-Process $ExtractedExe.FullName -ArgumentList "/S" -Wait
+    if ($Exe) {
+        Write-Output "Installing MSI Center silently (BIOS updates not included)..."
+        Start-Process $Exe.FullName -ArgumentList "/S" -Wait
     } else {
-        Write-Output "MSI installer EXE not found!"
+        Write-Output "MSI installer EXE not found. Aborting safely."
     }
 }
 else {
-    # Other vendors install directly
-    Write-Output "Installing vendor update utility..."
-    Start-Process $Installer -ArgumentList "/S" -Wait
+    Write-Output "Saving installer..."
+    Move-Item $ZipPath $InstallerPath -Force
+
+    Write-Output "Installing vendor utility silently (BIOS OFF)..."
+
+    switch -Wildcard ($vendor) {
+
+        "*Lenovo*" {
+            Start-Process $InstallerPath -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
+        }
+
+        "*Dell*" {
+            Start-Process $InstallerPath -ArgumentList "/S" -Wait
+        }
+
+        "*HP*" {
+            Start-Process $InstallerPath -ArgumentList "/silent /install" -Wait
+        }
+    }
 }
 
-Write-Output "Cleaning up installer files..."
-Remove-Item "$Installer*" -Force -ErrorAction SilentlyContinue
-Remove-Item "$Installer.zip" -Force -ErrorAction SilentlyContinue
 
-Write-Output "Vendor update utility installed successfully."
+# ===== SAFETY: Disable BIOS Update Features =====
+
+Write-Output "`nApplying BIOS update safety blocks..."
+
+if ($vendor -like "*Lenovo*") {
+    New-Item -Path "HKLM:\SOFTWARE\WOW6432Node\Lenovo\System Update\Preferences\UserSettings" -Force | Out-Null
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\WOW6432Node\Lenovo\System Update\Preferences\UserSettings" -Name "IncludeBIOS" -Value 0
+    Write-Output "✔ Lenovo BIOS updates disabled."
+}
+
+if ($vendor -like "*Dell*") {
+    New-Item -Path "HKLM:\SOFTWARE\Dell\CommandUpdate" -Force | Out-Null
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Dell\CommandUpdate" -Name "FirmwareUpdate" -Value 0
+    Write-Output "✔ Dell firmware updates disabled."
+}
+
+if ($vendor -like "*HP*") {
+    Write-Output "✔ HP Image Assistant does NOT auto-install BIOS. Safe."
+}
+
+if ($vendor -like "*Micro-Star*") {
+    Write-Output "✔ MSI Center does NOT auto-install BIOS. Safe."
+}
+
+# Cleanup
+Write-Output "`nCleaning up temporary files..."
+Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue
+Remove-Item $InstallerPath -Force -ErrorAction SilentlyContinue
+Remove-Item $ExtractPath -Recurse -Force -ErrorAction SilentlyContinue
+
+Write-Output "`n=== Vendor utility installed safely. BIOS updates are blocked. ==="
+Write-Output "Technician must manually run the utility if needed."
