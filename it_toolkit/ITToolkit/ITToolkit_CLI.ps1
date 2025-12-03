@@ -222,7 +222,11 @@ function Invoke-ITT-MenuPage {
                 if (-not $cmd) {
                     Write-Host "Action not available: $($selected.Action)" -ForegroundColor Red
                 } else {
-                    & $cmd @($selected.Arguments)
+                    if ($null -ne $selected.Arguments -and $selected.Arguments.Count -gt 0) {
+                        & $cmd @($selected.Arguments)
+                    } else {
+                        & $cmd
+                    }
                 }
             }
         } catch {
