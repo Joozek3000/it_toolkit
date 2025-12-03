@@ -3,17 +3,19 @@
 
 # Ensure main module is loaded
 Import-Module "$PSScriptRoot\ITToolkit.psm1" -Force
+# Force UTF-8 early for banners/menus
+try {
+    chcp 65001 > $null
+    $OutputEncoding = [System.Text.UTF8Encoding]::new()
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+} catch {}
+if (Get-Command Invoke-ITT-EnsureUtf8Encoding -ErrorAction SilentlyContinue) {
+    Invoke-ITT-EnsureUtf8Encoding
+}
 
-$ITBanner = @'
-██╗████████╗    ████████╗ ██████╗  ██████╗ ██╗     ██╗  ██╗██╗████████╗
-██║╚══██╔══╝    ╚══██╔══╝██╔═══██╗██╔═══██╗██║     ██║ ██╔╝██║╚══██╔══╝
-██║   ██║          ██║   ██║   ██║██║   ██║██║     █████╔╝ ██║   ██║   
-██║   ██║          ██║   ██║   ██║██║   ██║██║     ██╔═██╗ ██║   ██║   
-██║   ██║          ██║   ╚██████╔╝╚██████╔╝███████╗██║  ██╗██║   ██║   
-╚═╝   ╚═╝          ╚═╝    ╚═════╝  ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝   ╚═╝   
-
-                               I T   T O O L K I T
-'@
+$ITBanner = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(@"
+CuKWiOKWiOKVl+KWiOKWiOKWiOKWiOKWiOKWiOKWiOKWiOKVlyAgICDilojilojilojilojilojilojilojilojilZcg4paI4paI4paI4paI4paI4paI4pWXICDilojilojilojilojilojilojilZcg4paI4paI4pWXICAgICDilojilojilZcgIOKWiOKWiOKVl+KWiOKWiOKVl+KWiOKWiOKWiOKWiOKWiOKWiOKWiOKWiOKVlwrilojilojilZHilZrilZDilZDilojilojilZTilZDilZDilZ0gICAg4pWa4pWQ4pWQ4paI4paI4pWU4pWQ4pWQ4pWd4paI4paI4pWU4pWQ4pWQ4pWQ4paI4paI4pWX4paI4paI4pWU4pWQ4pWQ4pWQ4paI4paI4pWX4paI4paI4pWRICAgICDilojilojilZEg4paI4paI4pWU4pWd4paI4paI4pWR4pWa4pWQ4pWQ4paI4paI4pWU4pWQ4pWQ4pWdCuKWiOKWiOKVkSAgIOKWiOKWiOKVkSAgICAgICAgICDilojilojilZEgICDilojilojilZEgICDilojilojilZHilojilojilZEgICDilojilojilZHilojilojilZEgICAgIOKWiOKWiOKWiOKWiOKWiOKVlOKVnSDilojilojilZEgICDilojilojilZEgICAK4paI4paI4pWRICAg4paI4paI4pWRICAgICAgICAgIOKWiOKWiOKVkSAgIOKWiOKWiOKVkSAgIOKWiOKWiOKVkeKWiOKWiOKVkSAgIOKWiOKWiOKVkeKWiOKWiOKVkSAgICAg4paI4paI4pWU4pWQ4paI4paI4pWXIOKWiOKWiOKVkSAgIOKWiOKWiOKVkSAgIArilojilojilZEgICDilojilojilZEgICAgICAgICAg4paI4paI4pWRICAg4pWa4paI4paI4paI4paI4paI4paI4pWU4pWd4pWa4paI4paI4paI4paI4paI4paI4pWU4pWd4paI4paI4paI4paI4paI4paI4paI4pWX4paI4paI4pWRICDilojilojilZfilojilojilZEgICDilojilojilZEgICAK4pWa4pWQ4pWdICAg4pWa4pWQ4pWdICAgICAgICAgIOKVmuKVkOKVnSAgICDilZrilZDilZDilZDilZDilZDilZ0gIOKVmuKVkOKVkOKVkOKVkOKVkOKVnSDilZrilZDilZDilZDilZDilZDilZDilZ3ilZrilZDilZ0gIOKVmuKVkOKVneKVmuKVkOKVnSAgIOKVmuKVkOKVnSAgIAo=
+"@))
 
 <#
 .SYNOPSIS
@@ -22,20 +24,55 @@ Displays ASCII text with a short glitch/flicker effect.
 Randomizes foreground color and timing across 6-10 frames to give a quick glitch animation.
 .PARAMETER Text
 ASCII banner text to render.
+.PARAMETER SkipClear
+Do not clear the host between frames (preserves previous output).
 #>
 function Show-GlitchText {
     param(
         [Parameter(Mandatory)]
-        [string]$Text
+        [string]$Text,
+        [switch]$SkipClear,
+        [switch]$Static,
+        [int]$FrameCount = 6,
+        [int]$MinDelayMs = 40,
+        [int]$MaxDelayMs = 90
     )
 
-    $frames     = Get-Random -Minimum 6 -Maximum 11
+    if ($Static) {
+        if (-not $SkipClear) { Clear-Host } else { Write-Host "" }
+        Write-Host $Text -ForegroundColor Cyan
+        return
+    }
+
+    if ($FrameCount -lt 1) { $FrameCount = 6 }
+    $frames     = $FrameCount
     $colors     = @('Cyan','White','Gray','DarkCyan')
-    for ($i = 0; $i -lt $frames; $i++) {
-        $color = Get-Random -InputObject $colors
-        Clear-Host
-        Write-Host $Text -ForegroundColor $color
-        Start-Sleep -Milliseconds (Get-Random -Minimum 30 -Maximum 91)
+    $lines      = $Text -split "`n"
+
+    # Position tracking for repainting without stacking frames
+    $cursorTop = $null
+    if ($Host.UI.RawUI) {
+        $cursorTop = $Host.UI.RawUI.CursorPosition.Y
+    }
+
+    if (-not $SkipClear) { Clear-Host }
+    if ($cursorTop -ne $null) {
+        # Write once to allocate space, then repaint in-place
+        Write-Host $Text -ForegroundColor Cyan
+        for ($i = 0; $i -lt $frames; $i++) {
+            $color = Get-Random -InputObject $colors
+            $Host.UI.RawUI.CursorPosition = [System.Management.Automation.Host.Coordinates]::new(0, $cursorTop)
+            Write-Host $Text -ForegroundColor $color
+            Start-Sleep -Milliseconds (Get-Random -Minimum $MinDelayMs -Maximum ($MaxDelayMs + 1))
+        }
+    } else {
+        # Fallback: clear between frames
+        for ($i = 0; $i -lt $frames; $i++) {
+            $color = Get-Random -InputObject $colors
+            if (-not $SkipClear) { Clear-Host } else { Write-Host "" }
+            Write-Host $Text -ForegroundColor $color
+            Start-Sleep -Milliseconds (Get-Random -Minimum $MinDelayMs -Maximum ($MaxDelayMs + 1))
+        }
     }
 }
 
@@ -44,8 +81,18 @@ function Show-GlitchText {
 Shows a short ASCII spinning cube animation.
 .DESCRIPTION
 Loops four cube frames twice with a slight delay, clearing the screen each frame.
+.PARAMETER SkipClear
+Do not clear the host between frames (preserves previous output).
 #>
 function Show-SpinningCube {
+    param(
+        [switch]$SkipClear,
+        [switch]$Static,
+        [int]$Loops = 1,
+        [int]$MinDelayMs = 100,
+        [int]$MaxDelayMs = 150
+    )
+
     $frames = @(
 @'
    +----+
@@ -81,11 +128,19 @@ function Show-SpinningCube {
 '@
     )
 
-    for ($loop = 0; $loop -lt 2; $loop++) {
+    if ($Static) {
+        if (-not $SkipClear) { Clear-Host } else { Write-Host "" }
+        Write-Host $frames[0]
+        return
+    }
+
+    if ($Loops -lt 1) { $Loops = 1 }
+
+    for ($loop = 0; $loop -lt $Loops; $loop++) {
         foreach ($frame in $frames) {
-            Clear-Host
+            if (-not $SkipClear) { Clear-Host } else { Write-Host "" }
             Write-Host $frame
-            Start-Sleep -Milliseconds (Get-Random -Minimum 100 -Maximum 151)
+            Start-Sleep -Milliseconds (Get-Random -Minimum $MinDelayMs -Maximum ($MaxDelayMs + 1))
         }
     }
 }
@@ -197,6 +252,13 @@ function Invoke-ITT-MainMenu {
         @{ Key="11"; Label="BIOS & Profile Tools"; Action={ Invoke-ITT-ProfilesMenu } }
         @{ Key="12"; Label="Event Log Tools"; Action={ Invoke-ITT-EventLogMenu } }
         @{ Key="13"; Label="Nuclear Tools"; Action={ Invoke-ITT-NuclearMenu } }
+        @{ Key="14"; Label="OneDrive Repair"; Action="Invoke-ITT-OneDriveRepair"; Check={ Get-Command Invoke-ITT-OneDriveRepair -ErrorAction SilentlyContinue } }
+        @{ Key="15"; Label="Teams Repair"; Action="Invoke-ITT-TeamsRepair"; Check={ Get-Command Invoke-ITT-TeamsRepair -ErrorAction SilentlyContinue } }
+        @{ Key="16"; Label="Windows Update (Advanced)"; Action="Invoke-ITT-WindowsUpdateAdvancedReset"; Check={ Get-Command Invoke-ITT-WindowsUpdateAdvancedReset -ErrorAction SilentlyContinue } }
+        @{ Key="17"; Label="Credential Manager Tools"; Action="Invoke-ITT-CredentialManagerAudit"; Check={ Get-Command Invoke-ITT-CredentialManagerAudit -ErrorAction SilentlyContinue } }
+        @{ Key="18"; Label="Start Menu Repair"; Action="Invoke-ITT-StartMenuRepair"; Check={ Get-Command Invoke-ITT-StartMenuRepair -ErrorAction SilentlyContinue } }
+        @{ Key="19"; Label="RDP Tools"; Action="Invoke-ITT-RDPCacheCleanup"; Check={ Get-Command Invoke-ITT-RDPCacheCleanup -ErrorAction SilentlyContinue } }
+        @{ Key="20"; Label="Chrome / Edge Repair"; Action="Invoke-ITT-ChromeEdgeRepair"; Check={ Get-Command Invoke-ITT-ChromeEdgeRepair -ErrorAction SilentlyContinue } }
         @{ Key="0"; Label="Exit"; Action="BACK" }
     )
     Write-Host "Tip: Type 'help <menu>' (e.g., help network tools) for menu help, or 'help <option>' inside a menu." -ForegroundColor DarkGray
@@ -392,10 +454,24 @@ Entry point for the IT Toolkit CLI.
 Loads the main menu loop.
 #>
 function Invoke-ITToolkit {
-    Clear-Host
-    Show-GlitchText -Text $ITBanner
-    Show-SpinningCube
-    Clear-Host
+    $startupError = $null
+    $preserveOutput = $Error.Count -gt 0
+    try {
+        if ($preserveOutput) {
+            # When preserving prior errors, avoid clearing; just show a single static banner.
+            Write-Host $ITBanner -ForegroundColor Cyan
+        } else {
+            Clear-Host
+            Show-GlitchText -Text $ITBanner -SkipClear:$false -FrameCount 10 -MinDelayMs 120 -MaxDelayMs 180
+            Start-Sleep -Milliseconds 250
+            Clear-Host
+            Write-Host $ITBanner -ForegroundColor Cyan
+        }
+    } catch {
+        $startupError = $_
+        Write-Host "Startup animation skipped: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host $ITBanner -ForegroundColor Cyan
+    }
     Invoke-ITT-MainMenu
 }
 

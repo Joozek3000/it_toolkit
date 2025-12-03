@@ -23,6 +23,7 @@ function Invoke-ITT-ResetPrintSpooler {
     try {
         Write-Host "Stopping Print Spooler service..." -ForegroundColor Yellow
         Stop-Service -Name spooler -Force -ErrorAction Stop
+        try { Wait-Service -Name spooler -Status Stopped -Timeout 10 } catch {}
 
         if (Test-Path $spoolPath) {
             Write-Host "Clearing queued print jobs at $spoolPath" -ForegroundColor Yellow
@@ -34,10 +35,16 @@ function Invoke-ITT-ResetPrintSpooler {
         } else {
             Write-Host "Spool directory not found at $spoolPath" -ForegroundColor Yellow
             Write-Verbose "Invoke-ITT-ResetPrintSpooler: spool path missing $spoolPath"
+            try {
+                New-Item -ItemType Directory -Path $spoolPath -Force -ErrorAction SilentlyContinue | Out-Null
+            } catch {
+                Write-Verbose "Invoke-ITT-ResetPrintSpooler: failed to recreate $spoolPath : $($_.Exception.Message)"
+            }
         }
 
         Write-Host "Starting Print Spooler service..." -ForegroundColor Yellow
         Start-Service -Name spooler -ErrorAction Stop
+        try { Wait-Service -Name spooler -Status Running -Timeout 10 } catch {}
 
         Write-Host "Print spooler reset complete." -ForegroundColor Green
     } catch {

@@ -1,5 +1,61 @@
 # Core helpers module for ITToolkit
 
+# Shared color map for consistent UI output
+$Script:ITTColorMap = @{
+    Info    = 'Cyan'
+    Success = 'Green'
+    Warn    = 'Yellow'
+    Error   = 'Red'
+    Detail  = 'DarkGray'
+}
+
+<#
+.SYNOPSIS
+Sets console/output encoding to UTF-8 for banner and menu rendering.
+.DESCRIPTION
+Applies UTF-8 to $OutputEncoding and the console to avoid garbled ASCII art or logs.
+#>
+function Invoke-ITT-EnsureUtf8Encoding {
+    try {
+        $OutputEncoding = [System.Text.UTF8Encoding]::new()
+        try { chcp 65001 > $null } catch { Write-Verbose "Invoke-ITT-EnsureUtf8Encoding: chcp failed $($_.Exception.Message)" }
+        if ($Host.UI.RawUI -and $Host.UI.RawUI.GetType().Name -ne 'InternalHostRawUserInterface') {
+            [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+        } else {
+            [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+        }
+        Write-Verbose "Invoke-ITT-EnsureUtf8Encoding: UTF-8 encoding applied."
+    } catch {
+        Write-Verbose "Invoke-ITT-EnsureUtf8Encoding: failed to set UTF-8 encoding: $($_.Exception.Message)"
+    }
+}
+
+<#
+.SYNOPSIS
+Writes a message with standardized coloring.
+.DESCRIPTION
+Supports Info/Success/Warn/Error/Detail levels; falls back to default if unknown.
+.PARAMETER Message
+Text to display.
+.PARAMETER Level
+Info|Success|Warn|Error|Detail
+.PARAMETER NoNewline
+Suppress newline if specified.
+#>
+function Invoke-ITT-WriteLog {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Message,
+        [ValidateSet('Info','Success','Warn','Error','Detail')]
+        [string]$Level = 'Info',
+        [switch]$NoNewline
+    )
+
+    $color = $Script:ITTColorMap[$Level]
+    if (-not $color) { $color = 'White' }
+    Write-Host $Message -ForegroundColor $color -NoNewline:$NoNewline
+}
+
 <#!
 .SYNOPSIS
 Asks the user for a yes/no confirmation.
@@ -13,11 +69,13 @@ System.Boolean
 function Invoke-ITT-AskYesNo {
     param([string]$Message)
     while ($true) {
-        $userInput = Read-Host "$Message [y/n]"
+        $userInput = (Read-Host "$Message [y/n]").Trim()
         switch ($userInput.ToLower()) {
             "y" { return $true }
+            "yes" { return $true }
             "n" { return $false }
-            default { Write-Host "Please answer y or n." -ForegroundColor Yellow }
+            "no" { return $false }
+            default { Invoke-ITT-WriteLog "Please answer y or n." -Level Warn }
         }
     }
 }
@@ -136,6 +194,26 @@ function Invoke-ITT-ReinstallWebView2 {
         [string]$DownloadPath = (Join-Path $env:TEMP "EdgeWebView2.exe"),
         [switch]$Quiet
     )
+
+    $detectedVersion = $null
+    try {
+        $regPaths = @(
+            "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+            "HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+            "HKCU:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+        )
+        foreach ($path in $regPaths) {
+            $prop = Get-ItemProperty -Path $path -ErrorAction SilentlyContinue
+            if ($prop -and $prop.pv) { $detectedVersion = $prop.pv; break }
+        }
+        if ($detectedVersion) {
+            Write-Verbose "Invoke-ITT-ReinstallWebView2: detected WebView2 version $detectedVersion"
+        } else {
+            Write-Verbose "Invoke-ITT-ReinstallWebView2: no existing WebView2 version detected"
+        }
+    } catch {
+        Write-Verbose "Invoke-ITT-ReinstallWebView2: detection failed $($_.Exception.Message)"
+    }
 
     try {
         Write-Verbose "Downloading WebView2 to $DownloadPath"
@@ -271,4 +349,4 @@ function Invoke-ITT-ExportHtmlReport {
     }
 }
 
-Export-ModuleMember -Function Invoke-ITT-AskYesNo,Invoke-ITT-SaveReport,Invoke-ITT-ClearFolder,Invoke-ITT-ReinstallWebView2,Invoke-ITT-RunScriptFile,Invoke-ITT-Report,Invoke-ITT-ExportHtmlReport
+Export-ModuleMember -Function Invoke-ITT-EnsureUtf8Encoding,Invoke-ITT-WriteLog,Invoke-ITT-AskYesNo,Invoke-ITT-SaveReport,Invoke-ITT-ClearFolder,Invoke-ITT-ReinstallWebView2,Invoke-ITT-RunScriptFile,Invoke-ITT-Report,Invoke-ITT-ExportHtmlReport

@@ -88,16 +88,24 @@ function Invoke-ITT-OutlookRebuildOST {
     Write-Host "`n=== Rebuild Outlook OST (offline cache) ===" -ForegroundColor Cyan
     Write-Host "This forces Outlook to download a fresh mailbox cache. Close Outlook before continuing." -ForegroundColor Yellow
 
-    $ostRoot = Join-Path $env:LOCALAPPDATA "Microsoft\Outlook"
-    if (-not (Test-Path $ostRoot)) {
-        Write-Host "No OST folder found at $ostRoot" -ForegroundColor Red
-        Write-Verbose "OutlookRebuildOST: ost root missing $ostRoot"
+    $ostRoot   = Join-Path $env:LOCALAPPDATA "Microsoft\Outlook"
+    $pstRoot   = Join-Path $env:USERPROFILE "Documents\Outlook Files"
+    $search    = @($ostRoot, $pstRoot) | Where-Object { Test-Path $_ }
+
+    if (-not $search -or $search.Count -eq 0) {
+        Write-Host "No Outlook data paths found (checked $ostRoot and $pstRoot)." -ForegroundColor Red
+        Write-Verbose "OutlookRebuildOST: no search roots available."
         return
     }
 
-    $ostFiles = Get-ChildItem -Path $ostRoot -Filter *.ost -ErrorAction SilentlyContinue
+    $ostFiles = @()
+    foreach ($path in $search) {
+        $ostFiles += Get-ChildItem -Path $path -Filter *.ost -ErrorAction SilentlyContinue
+    }
+    $ostFiles = $ostFiles | Sort-Object FullName -Unique
+
     if (-not $ostFiles -or $ostFiles.Count -eq 0) {
-        Write-Host "No .ost files found under $ostRoot" -ForegroundColor Red
+        Write-Host "No .ost files found under $($search -join ', ')" -ForegroundColor Red
         return
     }
 
@@ -144,6 +152,32 @@ function Invoke-ITT-OutlookRepairWebView2 {
     Write-Host "`n=== Repair WebView2 Runtime for Outlook ===" -ForegroundColor Cyan
     Write-Host "Modern Outlook uses WebView2 for UI, auth popups and file dialogs." -ForegroundColor Yellow
     Write-Host "This will try to launch the official WebView2 runtime installer site." -ForegroundColor Yellow
+
+    # Detect existing WebView2 version (if present)
+    $detectedVersion = $null
+    $installPath     = $null
+    try {
+        $regPaths = @(
+            "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+            "HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+            "HKCU:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+        )
+        foreach ($path in $regPaths) {
+            $prop = Get-ItemProperty -Path $path -ErrorAction SilentlyContinue
+            if ($prop -and $prop.pv) { $detectedVersion = $prop.pv; break }
+        }
+        if ($detectedVersion) {
+            $installPath = Join-Path ${env:ProgramFiles(x86)} "Microsoft\EdgeWebView\Application\$detectedVersion\msedgewebview2.exe"
+            if (-not (Test-Path $installPath)) {
+                $installPath = Join-Path $env:ProgramFiles "Microsoft\EdgeWebView\Application\$detectedVersion\msedgewebview2.exe"
+            }
+            Write-Host ("Detected WebView2 version: {0} {1}" -f $detectedVersion, (if (Test-Path $installPath) { "(installed)" } else { "(binary not found)" })) -ForegroundColor DarkGray
+        } else {
+            Write-Host "WebView2 version not detected; proceeding to download site." -ForegroundColor DarkGray
+        }
+    } catch {
+        Write-Verbose "OutlookRepairWebView2: detection failed $($_.Exception.Message)"
+    }
 
     $url = "https://developer.microsoft.com/en-us/microsoft-edge/webview2/#download-section"
     try {
@@ -215,10 +249,33 @@ function Invoke-ITT-OutlookProfileCheck {
 
     if (-not $profiles -or $profiles.Count -eq 0) {
         Write-Host "No Outlook XML profile definitions found in $profilesPath" -ForegroundColor Yellow
-    }
-    else {
+    } else {
         Write-Host "Profiles detected:" -ForegroundColor Yellow
         $profiles | ForEach-Object { Write-Host " - $($_.Name)" }
+    }
+
+    # OST/PST presence check
+    $ostRoot = Join-Path $env:LOCALAPPDATA "Microsoft\Outlook"
+    $pstRoot = Join-Path $env:USERPROFILE "Documents\Outlook Files"
+    $dataPaths = @()
+    if (Test-Path $ostRoot) { $dataPaths += $ostRoot }
+    if (Test-Path $pstRoot) { $dataPaths += $pstRoot }
+
+    if ($dataPaths.Count -gt 0) {
+        Write-Host "Data files detected (OST/PST):" -ForegroundColor Yellow
+        foreach ($path in $dataPaths) {
+            $files = Get-ChildItem -Path $path -Include *.ost,*.pst -ErrorAction SilentlyContinue
+            if (-not $files -or $files.Count -eq 0) {
+                Write-Host " - None found in $path" -ForegroundColor DarkGray
+            } else {
+                $files | ForEach-Object {
+                    $sizeGB = [Math]::Round($_.Length / 1GB, 2)
+                    Write-Host (" - {0} ({1} GB)" -f $_.FullName, $sizeGB)
+                }
+            }
+        }
+    } else {
+        Write-Host "No Outlook data paths found under default locations." -ForegroundColor Yellow
     }
 }
 
